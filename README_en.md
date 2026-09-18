@@ -2,6 +2,8 @@
 
 A macOS CLI that archives folders as ZIP files, resolving symbolic links and Finder aliases to their actual contents. Original files are left unchanged.
 
+Filenames are stored as UTF-8, with the UTF-8 flag explicitly set in both local headers and the central directory. This prevents extraction tools from interpreting Japanese filenames using a different encoding. No additional option is needed. ZIP files created by earlier versions are not updated automatically; recreate them as needed.
+
 ## Build and run
 
 Requires macOS and Xcode Command Line Tools (`xcrun swiftc`).
@@ -24,6 +26,7 @@ When a link points to a folder, **its contents are archived recursively as a reg
 - Alias resolution does not display UI or automatically mount volumes. Connect any required disks or network shares beforehand.
 - Hidden files, empty folders, and package contents are included. Because links inside packages are also expanded, this tool is not suitable for backups that must preserve application signatures or behavior.
 - Regular files are copied using Foundation, and `ditto` includes macOS resource forks and related metadata in the ZIP. Directories are created anew, preserving ordinary permission bits and modification times. Full preservation of directory extended attributes, ACLs, and hard-link identity is outside the scope of this tool.
+- The ZIP may contain a `__MACOSX` folder for macOS-specific metadata, as well as `.DS_Store` files containing Finder display settings if they were present in the source folders. On Windows or other non-macOS systems, you can safely ignore these items.
 - Temporary storage must have enough space for all resolved contents. The destination volume must have space for the ZIP, or up to two copies of it when using the copy method: the temporary ZIP and the output ZIP. Temporary data is removed on normal completion or handled errors. Forced termination or power loss may leave temporary folders behind.
 - Do not modify source data while the command is running. The tool does not create a filesystem snapshot.
 - To finalize the ZIP, the tool first attempts to create a hard link on the destination volume. If this fails with an unsupported-operation error (`ENOTSUP`, `EOPNOTSUPP`, or `ENOSYS`) or `EXDEV`, it automatically falls back to copying into a file created exclusively at the destination. This allows direct output to NAS/SMB shares, exFAT volumes, and other destinations without hard-link support. Existing files and symbolic links are never overwritten, including those created by another process during the operation. Permission errors, connection errors, and other failures are reported without this fallback.
@@ -63,3 +66,5 @@ make test
 Requires Python 3.11 or later. The tests create actual macOS aliases and cover external files and folders, mixed symbolic links and aliases, cycles, broken links, overwrite prevention, Japanese filenames, hidden files, empty folders, and executable permissions.
 
 Publication tests simulate unavailable hard-link support and check automatic fallback, forced copying, competing creation of the same output filename, and cleanup after a failure during writing. They do not include connection tests against an actual NAS or SMB server.
+
+Encoding tests extract filenames containing Japanese, Korean, emoji, and combining characters using Python's `zipfile` without an encoding override and macOS `ditto`. They also verify UTF-8 flags in both headers, ZIP64 support, preservation of all data other than the flags, and rejection of invalid input. They do not include extraction tests on an actual Windows machine.

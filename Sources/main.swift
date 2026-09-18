@@ -166,6 +166,7 @@ func run() throws {
     guard process.terminationReason == .exit, process.terminationStatus == 0 else {
         throw Failure("ditto failed (status \(process.terminationStatus))")
     }
+    try markZIPNamesAsUTF8(zip)
     try publishZIP(zip, to: destination, copyOutput: copyOutput)
     print(destination.path)
 }

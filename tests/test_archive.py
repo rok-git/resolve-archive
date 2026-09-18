@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import stat
+import struct
 import subprocess
 import tempfile
 import unittest
@@ -49,8 +50,7 @@ class ArchiveTests(unittest.TestCase):
         self.alias(self.external, self.source / 'directory alias')
         (self.source / 'mixed').symlink_to('file alias')
         self.archive()
-        # ditto stores UTF-8 names without setting ZIP's UTF-8 flag.
-        with zipfile.ZipFile(self.output, metadata_encoding='utf-8') as z:
+        with zipfile.ZipFile(self.output) as z:
             prefix = self.source.name + '/'
             for name in ['relative', 'file alias', 'mixed', 'directory/内容.txt', 'directory alias/内容.txt']:
                 self.assertEqual(z.read(prefix + name).decode(), '外部の実体\n')
@@ -115,10 +115,34 @@ class ArchiveTests(unittest.TestCase):
     def test_copy_output(self):
         (self.source / 'linked').symlink_to(self.external / '内容.txt')
         self.archive(True, '--copy-output')
-        with zipfile.ZipFile(self.output, metadata_encoding='utf-8') as z:
+        with zipfile.ZipFile(self.output) as z:
             self.assertIsNone(z.testzip())
             self.assertEqual(z.read(self.source.name + '/linked').decode(), '外部の実体\n')
         self.assertFalse(list(self.base.glob('.resolve-archive-*')))
+
+    def test_utf8_headers_and_extraction(self):
+        names = ['日本語.txt', '가나다.txt', '絵文字😀.txt', 'カ\u3099.txt']
+        for name in names:
+            (self.source / name).write_text(name, encoding='utf-8')
+        self.archive()
+        with zipfile.ZipFile(self.output) as z, self.output.open('rb') as raw:
+            self.assertIsNone(z.testzip())
+            for item in z.infolist():
+                self.assertTrue(item.flag_bits & 0x800, item.filename)
+                raw.seek(item.header_offset)
+                header = raw.read(30)
+                self.assertEqual(header[:4], b'PK\x03\x04')
+                self.assertTrue(struct.unpack_from('<H', header, 6)[0] & 0x800)
+                name_length = struct.unpack_from('<H', header, 26)[0]
+                self.assertEqual(raw.read(name_length).decode('utf-8'), item.filename)
+            extracted = self.base / 'extracted'
+            z.extractall(extracted)
+        for name in names:
+            self.assertEqual((extracted / self.source.name / name).read_text(), name)
+        mac_extracted = self.base / 'mac-extracted'
+        subprocess.run(['/usr/bin/ditto', '-x', '-k', str(self.output), str(mac_extracted)], check=True)
+        for name in names:
+            self.assertEqual((mac_extracted / self.source.name / name).read_text(), name)
 
     def test_copy_output_existing(self):
         self.output.write_bytes(b'keep me')
